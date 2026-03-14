@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>OpticFlow | Live Auditor</title>
+    <style>
+        :root {
+            --primary: #38bdf8; 
+            --accent: #f43f5e; 
+            --bg-dark: #0f172a;
+            --panel-bg: #1e293b;
+            --border-glass: rgba(56, 189, 248, 0.25);
+        }
+
+        body, html {
+            margin: 0; padding: 0; height: 100dvh; width: 100vw;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #000; color: white; overflow: hidden;
+        }
+
+        #app-container { display: flex; flex-direction: column; height: 100%; width: 100%; }
+
+        .camera-section {
+            flex: 1; min-height: 40dvh; max-height: 50dvh; 
+            background: #000; position: relative; border-bottom: 2px solid var(--primary);
+        }
+        video { width: 100%; height: 100%; object-fit: contain; }
+
+        .ui-section {
+            flex: 1; display: flex; flex-direction: column; 
+            background: var(--bg-dark); padding: 15px; 
+            box-sizing: border-box; overflow-y: auto;
+        }
+
+        .header {
+            display: flex; justify-content: space-between; align-items: center;
+            background: var(--panel-bg); padding: 12px 15px; border-radius: 12px;
+            border: 1px solid var(--border-glass); flex-shrink: 0; margin-bottom: 10px;
+        }
+
+        .brand { font-size: 1.1rem; font-weight: 800; letter-spacing: 1px; color: var(--primary); }
+        .sub-text { font-size: 0.75rem; color: #cbd5e1; display: block; margin-top: 2px; }
+
+        .status-pill {
+            display: flex; align-items: center; gap: 8px; font-size: 0.75rem; font-weight: bold;
+            color: #f8fafc; background: rgba(0,0,0,0.5); padding: 6px 12px; border-radius: 50px;
+        }
+
+        .pulse-dot { width: 10px; height: 10px; border-radius: 50%; background-color: #94a3b8; }
+        .listening .pulse-dot { background-color: #10b981; box-shadow: 0 0 10px #10b981; animation: pulse 1s infinite; }
+        .thinking .pulse-dot { background-color: var(--primary); box-shadow: 0 0 10px var(--primary); animation: pulse 1s infinite; }
+        .auditing .pulse-dot { background-color: #a855f7; box-shadow: 0 0 10px #a855f7; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; } }
+
+        .feed-container {
+            flex-grow: 1; overflow-y: auto; scroll-behavior: smooth;
+            display: flex; flex-direction: column; gap: 10px; padding-right: 5px; margin-bottom: 10px;
+        }
+        .feed-container::-webkit-scrollbar { width: 4px; }
+        .feed-container::-webkit-scrollbar-thumb { background: var(--primary); border-radius: 10px; }
+
+        .log-card { background: var(--panel-bg); border: 1px solid var(--border-glass); border-radius: 12px; padding: 12px; animation: slideUp 0.3s ease forwards; }
+        @keyframes slideUp { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+        .log-user { font-size: 0.8rem; color: #94a3b8; margin-bottom: 6px; font-style: italic; }
+        .log-ai { font-size: 0.95rem; color: white; line-height: 1.4; }
+        .log-ai a { color: var(--primary); text-decoration: underline; font-weight: bold; word-break: break-all; }
+        .tool-badge { display: inline-block; font-size: 0.65rem; background: rgba(56, 189, 248, 0.15); color: var(--primary); padding: 3px 6px; border-radius: 4px; margin-bottom: 6px; border: 1px solid var(--border-glass); }
+
+        .controls { flex-shrink: 0; padding-bottom: max(15px, env(safe-area-inset-bottom)); margin-top: auto; }
+        button {
+            background: var(--primary); color: #000; border: none; padding: 16px;
+            font-size: 1.1rem; font-weight: 800; border-radius: 12px; cursor: pointer; width: 100%;
+        }
+        button:active { transform: scale(0.98); }
+        canvas { display: none; }
+
+        @media (min-width: 768px) {
+            #app-container { flex-direction: row; }
+            .camera-section { flex: 2; max-height: 100dvh; border-bottom: none; border-right: 2px solid var(--primary); }
+            .ui-section { flex: 1; max-width: 450px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="app-container">
+        <div class="camera-section">
+            <video id="webcam" autoplay playsinline muted></video>
+        </div>
+
+        <div class="ui-section">
+            <div class="header">
+                <div>
+                    <div class="brand">OPTICFLOW</div>
+                    <span class="sub-text">Speak to command</span>
+                </div>
+                <div id="status-ui" class="status-pill">
+                    <div class="pulse-dot"></div>
+                    <span id="status-text">OFFLINE</span>
+                </div>
+            </div>
+
+            <div class="feed-container" id="feed">
+                <div class="log-card" style="text-align:center; color:#94a3b8; font-size:0.85rem;">System Ready. Initialize to begin.</div>
+            </div>
+
+            <div class="controls">
+                <button id="mainBtn">INITIALIZE SYSTEM</button>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('canvas');
+        const mainBtn = document.getElementById('mainBtn');
+        const statusUi = document.getElementById('status-ui');
+        const statusText = document.getElementById('status-text');
+        const feed = document.getElementById('feed');
+
+        let isRunning = false;
+        let isLocked = false; 
+        let recognition = null;
+        let auditTimer = null; 
+        let isSpeaking = false;
+
+        // --- NEW: State Trackers for Timeouts & Idle ---
+        let lastActivityTime = Date.now();
+        let timeoutWarned = false;
+        let idleTicks = 0;
+
+        let preferredVoice = null;
+        window.speechSynthesis.onvoiceschanged = () => {
+            preferredVoice = window.speechSynthesis.getVoices().find(v => v.name.includes("Google US English")) || window.speechSynthesis.getVoices()[0];
+        };
+
+        function formatLinks(text) {
+            return text.replace(/(https?:\/\/[^\s]+)/g, url => `<a href="${url}" target="_blank">View Link ↗</a>`);
+        }
+
+        function setStatus(state, message) {
+            statusUi.className = `status-pill ${state}`;
+            statusText.innerText = message;
+        }
+
+        function addLog(userText, aiText, toolUsed) {
+            if (feed.children.length === 1 && feed.children[0].innerText.includes("System Ready")) feed.innerHTML = "";
+
+            const card = document.createElement('div');
+            card.className = 'log-card';
+            
+            let displayUserText = userText;
+            if (userText.includes("[BACKGROUND AUDIT]")) displayUserText = "📷 Visual Inspection...";
+            if (userText.includes("[INITIAL SCAN]")) displayUserText = "🔍 Scanning environment...";
+            if (userText.includes("[IDLE_CHECK]")) displayUserText = "⏳ Idle check...";
+            if (userText.includes("[TIMEOUT_WARNING]")) displayUserText = "⚠️ Timeout Warning";
+
+            card.innerHTML = `
+                <div class="log-user">"${displayUserText}"</div>
+                ${toolUsed !== "none" ? `<div class="tool-badge">⚙️ DATA SECURED</div>` : ''}
+                <div class="log-ai">${formatLinks(aiText)}</div>
+            `;
+            feed.appendChild(card);
+            feed.scrollTop = feed.scrollHeight;
+        }
+
+        function speak(text) {
+            if (text.trim() === "") return Promise.resolve();
+            return new Promise((resolve) => {
+                window.speechSynthesis.cancel();
+                const cleanText = text.replace(/(https?:\/\/[^\s]+)/g, "I have provided the link on your screen."); 
+                const utterance = new SpeechSynthesisUtterance(cleanText);
+                if (preferredVoice) utterance.voice = preferredVoice;
+                utterance.rate = 1.05;
+                
+                const safetyUnlock = setTimeout(() => { isSpeaking = false; resolve(); }, 6000);
+                
+                utterance.onstart = () => { isSpeaking = true; setStatus('idle', 'SPEAKING...'); };
+                utterance.onend = () => { isSpeaking = false; clearTimeout(safetyUnlock); resolve(); };
+                utterance.onerror = () => { isSpeaking = false; clearTimeout(safetyUnlock); resolve(); }; 
+                
+                window.speechSynthesis.speak(utterance);
+            });
+        }
+
+        // Centralized shutdown logic
+        function triggerHardShutdown() {
+            isRunning = false;
+            isLocked = false;
+            isSpeaking = false;
+            if (auditTimer) clearTimeout(auditTimer);
+            mainBtn.innerText = "INITIALIZE SYSTEM";
+            mainBtn.style.background = "var(--primary)";
+            setStatus('idle', 'OFFLINE');
+            if (recognition) { try { recognition.stop(); } catch(e){} }
+            window.speechSynthesis.cancel();
+        }
+
+        async function processInteraction(transcript, isAudit) {
+            if (isLocked || !isRunning) return;
+            if (video.videoWidth === 0) return;
+
+            isLocked = true;
+            if (auditTimer) clearTimeout(auditTimer);
+            if (recognition) { try { recognition.stop(); } catch(e){} }
+
+            setStatus(isAudit ? 'auditing' : 'thinking', isAudit ? 'INSPECTING...' : 'SYNCING...');
+            
+            try {
+                const ctx = canvas.getContext('2d');
+                const scale = isAudit ? 0.5 : 1.0; 
+                canvas.width = video.videoWidth * scale;
+                canvas.height = video.videoHeight * scale;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                const imgQuality = isAudit ? 0.4 : 0.9;
+                const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', imgQuality));
+                
+                if (!blob) throw new Error("Image capture failed");
+
+                const formData = new FormData();
+                formData.append('image', blob, 'frame.jpg');
+                formData.append('prompt', transcript);
+
+                const response = await fetch('/analyze', { method: 'POST', body: formData });
+                const data = await response.json();
+                const isSilent = data.response.toUpperCase().includes("SILENCE");
+
+                if (!isSilent) {
+                    let textToSpeak = data.response;
+                    let shouldShutdown = false;
+
+                    if (textToSpeak.includes("[SHUTDOWN_CMD]")) {
+                        textToSpeak = textToSpeak.replace("[SHUTDOWN_CMD]", "").trim();
+                        shouldShutdown = true;
+                    }
+
+                    addLog(transcript, textToSpeak, data.tool_used);
+                    await speak(textToSpeak);
+
+                    if (shouldShutdown) {
+                        triggerHardShutdown();
+                        return; 
+                    }
+
+                    lastActivityTime = Date.now();
+                    timeoutWarned = false;
+                    idleTicks = 0;
+                } else {
+                    idleTicks++;
+                }
+            } catch (err) {
+                if (!isAudit) setStatus('idle', 'ERROR');
+                console.error(err);
+            } finally {
+                isLocked = false;
+                
+                if (isRunning) {
+                    if (recognition) { try { recognition.start(); setStatus('listening', 'MIC ACTIVE...'); } catch(e){} }
+                    
+                    auditTimer = setTimeout(() => {
+                        const timeSinceActive = Date.now() - lastActivityTime;
+
+                        if (timeSinceActive > 11 * 60 * 1000) {
+                            addLog("System", "Inactivity timeout reached. Shutting down.", "none");
+                            triggerHardShutdown();
+                            return;
+                        }
+
+                        if (timeSinceActive > 10 * 60 * 1000 && !timeoutWarned) {
+                            timeoutWarned = true;
+                            processInteraction("[TIMEOUT_WARNING] Provide a system warning.", true);
+                            return;
+                        }
+
+                        if (idleTicks >= 5) {
+                            idleTicks = 0; 
+                            processInteraction("[IDLE_CHECK] Check if the user needs help.", true);
+                            return;
+                        }
+                        processInteraction("[BACKGROUND AUDIT] Evaluate my progress on the current step. If I haven't moved or no task is set, output EXACTLY: SILENCE", true);
+                    }, 8500);
+                }
+            }
+        }
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = false; 
+            
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript.trim();
+                if (transcript.length > 2) {
+                    lastActivityTime = Date.now();
+                    timeoutWarned = false;
+                    idleTicks = 0;
+                    processInteraction(transcript, false);
+                }
+            };
+            
+            recognition.onend = () => {
+                if (isRunning && !isLocked) {
+                    setTimeout(() => { try { recognition.start(); setStatus('listening', 'MIC ACTIVE...'); } catch(e){} }, 300);
+                }
+            };
+        }
+
+        mainBtn.onclick = async () => {
+            if (!isRunning) {
+                const warmup = new SpeechSynthesisUtterance('');
+                window.speechSynthesis.speak(warmup);
+
+                isRunning = true;
+                lastActivityTime = Date.now();
+                timeoutWarned = false;
+                idleTicks = 0;
+
+                mainBtn.innerText = "SHUT DOWN SYSTEM";
+                mainBtn.style.background = "var(--accent)";
+                
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                    video.srcObject = stream;
+                    
+                    await new Promise((resolve) => {
+                        video.onloadedmetadata = () => { video.play(); setTimeout(resolve, 500); };
+                    });
+                } catch(e) { alert("Camera required."); isRunning = false; return; }
+
+                processInteraction("[INITIAL SCAN] Identify the main object in this camera view and ask me what I want to do with it.", false);
+            } else {
+                triggerHardShutdown();
+            }
+        };
+    </script>
+</body>
+</html>
