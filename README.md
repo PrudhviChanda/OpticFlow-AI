@@ -1,6 +1,4 @@
-# 👁️ OpticFlow: Autonomous Visual AI Auditor
-
-Built for the **Gemini Live Agent Challenge** (Live Agents Track).
+# OpticFlow: Autonomous Visual AI Auditor
 
 OpticFlow is a real-time, hands-free multimodal AI assistant. Unlike traditional "pull" AI chatbots where users must type queries and upload photos manually, OpticFlow is a "push" system. It utilizes a continuous visual audit loop to watch a user's physical actions in the real world, proactively correcting mistakes, issuing next steps, and fetching manuals or replacement parts autonomously.
 
@@ -32,7 +30,7 @@ OpticFlow is a real-time, hands-free multimodal AI assistant. Unlike traditional
 
 ## ☁️ How to Deploy to Google Cloud (Production)
 
-We have included an automated bash script to handle containerization and deployment to Google Cloud Run using a standard Python 3.12 slim image.
+We have included an automated bash script to handle containerization and deployment to Google Cloud Run using a standard Python 3.11 slim image.
 
 1. Ensure you have the `gcloud` CLI installed and authenticated.
 2. Make the script executable: `chmod +x deploy.sh`

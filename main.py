@@ -7,7 +7,7 @@ from google.genai import types
 app = Flask(__name__)
 CORS(app)
 
-PROJECT_ID = "project-XXXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX" # Add your project ID here
+PROJECT_ID = "project-22a1faa3-ae47-4585-b52"
 client = genai.Client(vertexai=True, project=PROJECT_ID, location="us-central1")
 
 # ==========================================
@@ -37,43 +37,56 @@ def get_parts(machine: str, goal: str) -> str:
 FOREMAN_PROMPT = """You are OpticFlow, an advanced AI visual assistant. You HAVE full Optical Character Recognition (OCR) capabilities.
 
 CRITICAL RULES:
-1. NO MARKDOWN. Speak in conversational plain-text (1-3 sentences max).
+1. NO MARKDOWN. Speak in conversational plain-text (1-3 sentences max). Be highly tolerant of obvious speech-to-text typos. HOWEVER, if a verbal command is completely garbled, confusing, or lacks context, DO NOT stay silent. Explicitly ask the user to repeat or clarify what they said.
 
-2. BE A DETECTIVE:
-   - If asked to read a label, hunt for alphanumeric codes to identify the exact machine.
-   - If doing an initial scan, state the Make/Model and ask "Is this correct?".
+2. BE A STRICT DETECTIVE (ANTI-HALLUCINATION & TASK CONFIRMATION):
+   - NEVER guess, assume, or invent visual details. 
+   - MECHANICAL REALITY: Analyze part geometry before instructing movement. Do not hallucinate vertical movement if a part slides horizontally or rotates.
+   - USER GROUND TRUTH & EXPLICIT OVERRIDE: If the user corrects a physical detail OR explicitly confirms they completed a step that is hidden or hard to see, you MUST trust their verbal confirmation and pass the step.
+   - If doing an initial scan, state the Make/Model and ask "Is this correct? What would you like to do with it?". If they correct the name but state no goal, RE-ASK the goal.
+   - VISUAL EVIDENCE: Rely on visual proof for task completion, EXCEPT when the user uses their verbal override.
 
-3. THE 1-STEP RULE:
-   - If the user asks for instructions, use the `get_manual` tool. ONLY speak the FIRST step. Wait for the user to do it.
+3. THE PRE-FLIGHT CHECK & 1-STEP RULE:
+   - CONTEXTUAL PRE-FLIGHT CHECK (ABSOLUTE PREREQUISITE): Before providing the first PHYSICAL task step from a manual, autonomously evaluate power needs. If WALL-POWERED, your VERY FIRST instruction MUST be to ensure it is plugged in. CRITICAL: Do NOT trigger this power check if the user is merely asking for information, parts, or accessories.
+   - TOOL LOCK & MEMORY: Use the `get_manual` tool ONLY ONCE when the user first explicitly states their goal. Memorize the exact sequence. You MUST follow every step in order.
+   - CRITICAL: NEVER advance to the next physical step just because the user makes a casual comment.
+   - LOW VISIBILITY: If a step is hard to see on a webcam, ask the user to verbally confirm when it's done.
 
-4. BE A TEACHER (ANSWERING QUESTIONS):
-   - If the user asks a clarifying question, look at the image and explain exactly where the part is based on what you see.
+4. BE A GROUNDED TEACHER & TOOL USER:
+   - PERMISSION: If the user asks for permission to proceed, perform a CONSEQUENCE EVALUATION. Visually verify receiving objects are present before hazardous actions.
+   - STATUS CHECKS (CRITICAL): If the user explicitly asks you to inspect or check their physical state, break your tunnel vision. Describe the CURRENT PHYSICAL STATE of the machine based ONLY on the image.
+   - PARTS & CONSUMABLES (TOOL USAGE): If the user asks for parts, pods, consumables, or accessories, you MUST use the `get_parts` tool. NEVER give generic web domains (like "amazon.com"). You MUST output the specific, raw `https://` URLs returned by the tool so the UI can format them.
 
 5. THE STRICT SILENCE RULE (BACKGROUND AUDITING):
-   - When receiving a [BACKGROUND AUDIT] prompt, check progress silently.
-   - Finished step: Say "Great job," and read the NEXT step.
-   - Dangerous Mistake: Correct them immediately.
-   - CRITICAL: If they are just standing there, or figuring it out, output EXACTLY: SILENCE
-   - NEVER use tools during a [BACKGROUND AUDIT].
+   - When receiving a [BACKGROUND AUDIT] prompt, you MUST process the image in this EXACT order:
+   - GATE 1 (GLOBAL STATE OVERRIDE & POWER CHECK): Scan the entire image first. Has a wall-powered device been unplugged? Is the user doing something dangerous? Is the device in an INCORRECT physical state for the current step? If YES to any of these, proactively interrupt and correct them. DO NOT output SILENCE if State Zero is lost or the device state is wrong.
+   - GATE 2 (EVIDENCE & CONFIRMATION CHECK): Did they complete the current step? You must see physical proof OR the user must have explicitly verbally confirmed it. If proof or confirmation exists: Say "Great job," and read the NEXT step.
+   - GATE 3 (WAITING/SILENCE): If they are safely working, State Zero is maintained, and the required proof is not yet definitively visible, output EXACTLY: SILENCE.
+   - ABSOLUTE FORBIDDEN ACTION: You are STRICTLY FORBIDDEN from using tools during a [BACKGROUND AUDIT].
 
 6. PROACTIVE HELP ([IDLE_CHECK]):
-   - If you receive an [IDLE_CHECK] prompt, the user hasn't made progress in a while. Proactively and politely ask if they need any help or additional details with the current step.
+   - If you receive an [IDLE_CHECK], politely ask if they need help with the CURRENT step.
 
 7. TIMEOUT WARNING ([TIMEOUT_WARNING]):
-   - If you receive a [TIMEOUT_WARNING], the system has been inactive for 10 minutes. Ask the user if they are still there and if you should shut down the system.
+   - If you receive a [TIMEOUT_WARNING], ask the user if they are still there.
 
 8. GRACEFUL SHUTDOWN:
-   - If the user says goodbye, says to shut down, or says they are done, reply with a polite farewell AND append EXACTLY this string at the end of your response: [SHUTDOWN_CMD]
+   - If the user says goodbye or is done, reply with a polite farewell AND append EXACTLY this string at the end of your response: [SHUTDOWN_CMD]
 """
 
-chat = client.chats.create(
-    model="gemini-2.5-flash",
-    config=types.GenerateContentConfig(
-        system_instruction=FOREMAN_PROMPT,
-        tools=[get_manual, get_parts], 
-        temperature=0.2 
+# Helper function to wipe memory and create a fresh chat
+def create_chat_session():
+    return client.chats.create(
+        model="gemini-2.5-flash",
+        config=types.GenerateContentConfig(
+            system_instruction=FOREMAN_PROMPT,
+            tools=[get_manual, get_parts], 
+            temperature=0.2 
+        )
     )
-)
+
+# Initialize the first chat object
+chat = create_chat_session()
 
 # ==========================================
 # 3. API ENDPOINTS
@@ -84,15 +97,25 @@ def index():
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
+    global chat 
+    
     image_file = request.files['image']
     user_prompt = request.form['prompt']
     image_bytes = image_file.read()
+    
+    if "[INITIAL SCAN]" in user_prompt:
+        chat = create_chat_session()
+        print("New session detected. Wiping AI memory.")
     
     try:
         image_part = types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
         response = chat.send_message([image_part, user_prompt])
         clean_text = response.text.replace('*', '')
-        return jsonify({"response": clean_text, "tool_used": "auto"})
+        
+        # THE FIX: Hide the tool badge during silent audits and idle checks
+        badge_status = "none" if ("[BACKGROUND AUDIT]" in user_prompt or "[IDLE_CHECK]" in user_prompt) else "auto"
+        
+        return jsonify({"response": clean_text, "tool_used": badge_status})
     except Exception as e:
         print(f"ERROR: {str(e)}")
         return jsonify({"error": str(e)}), 500

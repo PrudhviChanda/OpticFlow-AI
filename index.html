@@ -128,7 +128,7 @@
         let auditTimer = null; 
         let isSpeaking = false;
 
-        // --- NEW: State Trackers for Timeouts & Idle ---
+        // State Trackers for Timeouts & Idle
         let lastActivityTime = Date.now();
         let timeoutWarned = false;
         let idleTicks = 0;
@@ -196,6 +196,13 @@
             mainBtn.innerText = "INITIALIZE SYSTEM";
             mainBtn.style.background = "var(--primary)";
             setStatus('idle', 'OFFLINE');
+            
+            // THE FIX: Explicitly kill the hardware tracks to turn off the camera light
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+
             if (recognition) { try { recognition.stop(); } catch(e){} }
             window.speechSynthesis.cancel();
         }
