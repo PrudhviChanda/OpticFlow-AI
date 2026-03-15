@@ -187,7 +187,6 @@
             });
         }
 
-        // Centralized shutdown logic
         function triggerHardShutdown() {
             isRunning = false;
             isLocked = false;
@@ -196,8 +195,6 @@
             mainBtn.innerText = "INITIALIZE SYSTEM";
             mainBtn.style.background = "var(--primary)";
             setStatus('idle', 'OFFLINE');
-            
-            // THE FIX: Explicitly kill the hardware tracks to turn off the camera light
             if (video.srcObject) {
                 video.srcObject.getTracks().forEach(track => track.stop());
                 video.srcObject = null;

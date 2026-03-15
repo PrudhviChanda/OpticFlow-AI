@@ -7,12 +7,9 @@ from google.genai import types
 app = Flask(__name__)
 CORS(app)
 
-PROJECT_ID = "project-22a1faa3-ae47-4585-b52"
+PROJECT_ID = "project-XXXXXXX-XXXXXXXX-XXXXX" # Add project ID here
 client = genai.Client(vertexai=True, project=PROJECT_ID, location="us-central1")
 
-# ==========================================
-# 1. TOOLS
-# ==========================================
 def get_manual(machine: str, goal: str) -> str:
     prompt = f"Find standard manual for: {machine} - Task: {goal}. Output ONLY raw JSON with 'steps' key containing short, actionable strings."
     response = client.models.generate_content(
@@ -31,9 +28,6 @@ def get_parts(machine: str, goal: str) -> str:
     )
     return response.text
 
-# ==========================================
-# 2. THE STRICT STATE MACHINE BRAIN
-# ==========================================
 FOREMAN_PROMPT = """You are OpticFlow, an advanced AI visual assistant. You HAVE full Optical Character Recognition (OCR) capabilities.
 
 CRITICAL RULES:
@@ -74,7 +68,6 @@ CRITICAL RULES:
    - If the user says goodbye or is done, reply with a polite farewell AND append EXACTLY this string at the end of your response: [SHUTDOWN_CMD]
 """
 
-# Helper function to wipe memory and create a fresh chat
 def create_chat_session():
     return client.chats.create(
         model="gemini-2.5-flash",
@@ -85,12 +78,8 @@ def create_chat_session():
         )
     )
 
-# Initialize the first chat object
 chat = create_chat_session()
 
-# ==========================================
-# 3. API ENDPOINTS
-# ==========================================
 @app.route('/')
 def index():
     return send_from_directory(os.path.dirname(os.path.abspath(__file__)), 'index.html')
@@ -112,7 +101,6 @@ def analyze():
         response = chat.send_message([image_part, user_prompt])
         clean_text = response.text.replace('*', '')
         
-        # THE FIX: Hide the tool badge during silent audits and idle checks
         badge_status = "none" if ("[BACKGROUND AUDIT]" in user_prompt or "[IDLE_CHECK]" in user_prompt) else "auto"
         
         return jsonify({"response": clean_text, "tool_used": badge_status})
