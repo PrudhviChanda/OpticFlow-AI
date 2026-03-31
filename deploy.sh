@@ -5,7 +5,7 @@ echo "Building using Dockerfile and deploying container to Cloud Run service [op
 
 gcloud run deploy opticflow-agent \
   --source . \
-  --project project-22a1faa3-ae47-4585-b52 \
+  --project project-xxxx-xxxx-xxxx \
   --region us-central1 \
   --allow-unauthenticated \
   --memory 1Gi
